@@ -565,11 +565,12 @@ const VideoEditor = () => {
         audioElement.play();
       });
       
-      // Render frames with clipping awareness
+      // Render frames with proper format handling to match preview
       let exportTime = 0;
       const frameInterval = setInterval(() => {
         if (!ctx || !sourceVideo) return;
         
+        // Clear canvas with black background
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
@@ -581,6 +582,7 @@ const VideoEditor = () => {
           let drawWidth, drawHeight, drawX, drawY;
           
           if (format === '16:9') {
+            // Widescreen: fit video within bounds while maintaining aspect ratio
             if (videoAspect > canvasAspect) {
               drawWidth = canvas.width;
               drawHeight = canvas.width / videoAspect;
@@ -593,13 +595,26 @@ const VideoEditor = () => {
               drawY = 0;
             }
           } else {
-            drawWidth = canvas.width;
-            drawHeight = canvas.height;
-            drawX = 0;
-            drawY = 0;
+            // Vertical format: properly crop/fit to match preview behavior
+            // This should match exactly what you see in the app preview
+            if (videoAspect > canvasAspect) {
+              // Video is wider than canvas - crop sides (center crop)
+              drawHeight = canvas.height;
+              drawWidth = canvas.height * videoAspect;
+              drawX = (canvas.width - drawWidth) / 2; // Center horizontally
+              drawY = 0;
+            } else {
+              // Video is taller or same aspect - fit width and crop/center vertically
+              drawWidth = canvas.width;
+              drawHeight = canvas.width / videoAspect;
+              drawX = 0;
+              drawY = (canvas.height - drawHeight) / 2; // Center vertically
+            }
           }
           
           ctx.drawImage(sourceVideo, drawX, drawY, drawWidth, drawHeight);
+          
+          console.log(`Frame ${Math.floor(exportTime * 30)}: Drawing video at ${drawX}, ${drawY} with size ${drawWidth}x${drawHeight} (aspect: ${videoAspect}, canvas aspect: ${canvasAspect})`);
         }
         
         // Add captions overlay
@@ -607,7 +622,7 @@ const VideoEditor = () => {
           if (exportTime >= caption.startTime && exportTime <= caption.endTime) {
             ctx.fillStyle = '#ffffff';
             ctx.strokeStyle = '#000000';
-            ctx.font = 'bold 48px Arial';
+            ctx.font = `bold ${Math.round(canvas.height * 0.05)}px Arial`; // Responsive font size
             ctx.textAlign = 'center';
             ctx.lineWidth = 3;
             
