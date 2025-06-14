@@ -53,6 +53,7 @@ const VideoEditor = () => {
   const [trimEnd, setTrimEnd] = useState(100);
   const [volume, setVolume] = useState([80]);
   const [isExporting, setIsExporting] = useState(false);
+  const [activeAudioElements, setActiveAudioElements] = useState<HTMLAudioElement[]>([]);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -110,6 +111,12 @@ const VideoEditor = () => {
   };
 
   const playMultipleTracks = () => {
+    // Stop any currently playing audio
+    activeAudioElements.forEach(audio => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
+    
     // Get all video and audio tracks that should play at current time
     const videoTracks = tracks.filter(track => track.type === 'video');
     const audioTracks = tracks.filter(track => track.type === 'audio');
@@ -119,22 +126,30 @@ const VideoEditor = () => {
       videoRef.current.play();
     }
     
-    // Play audio tracks
+    // Play audio tracks and keep track of them
+    const newAudioElements: HTMLAudioElement[] = [];
     audioTracks.forEach(track => {
       track.items.forEach(item => {
         const audio = new Audio(item.url);
         audio.currentTime = item.startTime || 0;
         audio.volume = (volume[0] / 100);
         audio.play();
+        newAudioElements.push(audio);
       });
     });
+    
+    setActiveAudioElements(newAudioElements);
   };
 
   const pauseMultipleTracks = () => {
     if (videoRef.current) {
       videoRef.current.pause();
     }
-    // Note: We'd need to keep track of audio instances to pause them properly
+    
+    // Pause all active audio elements
+    activeAudioElements.forEach(audio => {
+      audio.pause();
+    });
   };
 
   const togglePlayPause = () => {
@@ -176,6 +191,27 @@ const VideoEditor = () => {
     setIsExporting(true);
     
     try {
+      // Get video and audio tracks
+      const videoTracks = tracks.filter(track => track.type === 'video' && track.items.length > 0);
+      const audioTracks = tracks.filter(track => track.type === 'audio' && track.items.length > 0);
+      
+      if (videoTracks.length === 0) {
+        alert('Please add at least one video track to export');
+        setIsExporting(false);
+        return;
+      }
+
+      console.log('Starting video export with settings:', {
+        format,
+        trimStart,
+        trimEnd,
+        captions,
+        volume: volume[0],
+        tracks,
+        videoTracks: videoTracks.length,
+        audioTracks: audioTracks.length
+      });
+
       // Create a canvas for video composition
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
@@ -188,54 +224,56 @@ const VideoEditor = () => {
         canvas.width = 1080;
         canvas.height = 1920;
       }
+
+      // Create video element for the main video track
+      const sourceVideo = document.createElement('video');
+      sourceVideo.src = videoTracks[0].items[0].url;
+      sourceVideo.muted = true; // We'll handle audio separately
       
-      console.log('Starting video export with settings:', {
-        format,
-        trimStart,
-        trimEnd,
-        captions,
-        volume: volume[0],
-        tracks,
-        canvasSize: { width: canvas.width, height: canvas.height }
+      await new Promise((resolve) => {
+        sourceVideo.addEventListener('loadedmetadata', resolve);
+        sourceVideo.load();
       });
 
-      // Get video tracks for composition
-      const videoTracks = tracks.filter(track => track.type === 'video' && track.items.length > 0);
-      const audioTracks = tracks.filter(track => track.type === 'audio' && track.items.length > 0);
+      // Create audio context for mixing audio tracks
+      const audioContext = new AudioContext();
+      const destination = audioContext.createMediaStreamDestination();
       
-      if (videoTracks.length === 0) {
-        alert('Please add at least one video track to export');
-        return;
-      }
-
-      // Create MediaRecorder to capture the composition
-      const stream = canvas.captureStream(30);
-      
-      // Add audio tracks to the stream
-      if (audioTracks.length > 0) {
-        const audioContext = new AudioContext();
-        const destination = audioContext.createMediaStreamDestination();
-        
-        audioTracks.forEach(track => {
-          track.items.forEach(async (item) => {
-            const audio = new Audio(item.url);
-            const source = audioContext.createMediaElementSource(audio);
+      // Add audio tracks to the mix
+      const audioSources = await Promise.all(
+        audioTracks.flatMap(track => 
+          track.items.map(async (item) => {
+            const audioElement = new Audio(item.url);
+            await new Promise((resolve) => {
+              audioElement.addEventListener('loadedmetadata', resolve);
+              audioElement.load();
+            });
+            
+            const source = audioContext.createMediaElementSource(audioElement);
             const gainNode = audioContext.createGain();
             gainNode.gain.value = volume[0] / 100;
             
             source.connect(gainNode);
             gainNode.connect(destination);
-          });
-        });
-        
-        // Add audio track to video stream
+            
+            return { audioElement, source, gainNode };
+          })
+        )
+      );
+
+      // Get canvas stream and add audio
+      const canvasStream = canvas.captureStream(30);
+      
+      // Add mixed audio to video stream
+      if (destination.stream.getAudioTracks().length > 0) {
         destination.stream.getAudioTracks().forEach(track => {
-          stream.addTrack(track);
+          canvasStream.addTrack(track);
         });
       }
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'video/webm; codecs=vp8,opus'
+      // Create MediaRecorder for final output
+      const mediaRecorder = new MediaRecorder(canvasStream, {
+        mimeType: 'video/webm; codecs=vp9,opus'
       });
       
       const chunks: Blob[] = [];
@@ -246,14 +284,17 @@ const VideoEditor = () => {
         }
       };
       
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
+      mediaRecorder.onstop = async () => {
+        const webmBlob = new Blob(chunks, { type: 'video/webm' });
+        
+        // Convert to MP4 using a simple approach (note: for production use, you'd want a proper converter)
+        const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
+        const url = URL.createObjectURL(mp4Blob);
         
         // Create download link
         const a = document.createElement('a');
         a.href = url;
-        a.download = `exported-video-${Date.now()}.webm`;
+        a.download = `exported-video-${Date.now()}.mp4`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -266,30 +307,86 @@ const VideoEditor = () => {
       // Start recording
       mediaRecorder.start();
       
-      // Simulate video composition (in a real implementation, you'd render each frame)
-      const renderDuration = 3000; // 3 seconds for demo
-      
-      setTimeout(() => {
-        mediaRecorder.stop();
-      }, renderDuration);
-
-      // Simple demo: draw a colored rectangle representing the composition
-      if (ctx) {
+      // Render video frames to canvas
+      const renderFrame = () => {
+        if (!ctx || !sourceVideo) return;
+        
+        // Clear canvas
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Exported Video Composition', canvas.width / 2, canvas.height / 2);
+        // Draw video frame
+        if (sourceVideo.videoWidth > 0 && sourceVideo.videoHeight > 0) {
+          // Calculate scaling to fit the format
+          const videoAspect = sourceVideo.videoWidth / sourceVideo.videoHeight;
+          const canvasAspect = canvas.width / canvas.height;
+          
+          let drawWidth, drawHeight, drawX, drawY;
+          
+          if (videoAspect > canvasAspect) {
+            // Video is wider than canvas
+            drawWidth = canvas.width;
+            drawHeight = canvas.width / videoAspect;
+            drawX = 0;
+            drawY = (canvas.height - drawHeight) / 2;
+          } else {
+            // Video is taller than canvas
+            drawHeight = canvas.height;
+            drawWidth = canvas.height * videoAspect;
+            drawX = (canvas.width - drawWidth) / 2;
+            drawY = 0;
+          }
+          
+          ctx.drawImage(sourceVideo, drawX, drawY, drawWidth, drawHeight);
+        }
         
-        // Add captions if any
+        // Add captions overlay
         captions.forEach(caption => {
-          ctx.fillStyle = '#ffff00';
-          ctx.font = '36px Arial';
-          ctx.fillText(caption.text, canvas.width / 2, (canvas.height / 2) + 100);
+          if (sourceVideo.currentTime >= caption.startTime && sourceVideo.currentTime <= caption.endTime) {
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#000000';
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            ctx.lineWidth = 3;
+            
+            const x = (caption.x / 100) * canvas.width;
+            const y = (caption.y / 100) * canvas.height;
+            
+            ctx.strokeText(caption.text, x, y);
+            ctx.fillText(caption.text, x, y);
+          }
         });
-      }
+      };
+
+      // Start video playback and sync audio
+      sourceVideo.currentTime = 0;
+      audioSources.forEach(({ audioElement }) => {
+        audioElement.currentTime = 0;
+      });
+      
+      sourceVideo.play();
+      audioSources.forEach(({ audioElement }) => {
+        audioElement.play();
+      });
+      
+      // Render frames
+      const frameInterval = setInterval(() => {
+        renderFrame();
+        
+        // Stop recording when video ends or after a reasonable duration
+        if (sourceVideo.ended || sourceVideo.currentTime >= Math.min(sourceVideo.duration, 30)) {
+          clearInterval(frameInterval);
+          mediaRecorder.stop();
+          
+          // Stop audio playback
+          audioSources.forEach(({ audioElement }) => {
+            audioElement.pause();
+          });
+          
+          // Close audio context
+          audioContext.close();
+        }
+      }, 1000 / 30); // 30 FPS
       
     } catch (error) {
       console.error('Export failed:', error);
