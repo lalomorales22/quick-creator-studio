@@ -932,8 +932,9 @@ const VideoEditor = () => {
         {/* Thumbnail Generator Modal */}
         {showThumbnailGenerator && (
           <ThumbnailGenerator
+            isOpen={showThumbnailGenerator}
             onClose={() => setShowThumbnailGenerator(false)}
-            onThumbnailGenerated={(thumbnail) => {
+            onThumbnailCreate={(thumbnail) => {
               // Add thumbnail to the thumbnail track
               const thumbnailMediaFile: MediaFile = {
                 id: Date.now().toString(),
@@ -941,7 +942,7 @@ const VideoEditor = () => {
                 type: 'video', // Using video type for thumbnails
                 url: thumbnail.url,
                 duration: 2, // 2 seconds
-                name: `Thumbnail: ${thumbnail.prompt}`,
+                name: thumbnail.name,
                 startTime: 0, // Always at the beginning
                 clipDuration: 2,
                 trackPosition: 0
