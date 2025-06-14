@@ -657,6 +657,9 @@ const VideoEditor = () => {
     }
   };
 
+  // New state variable for thumbnail generator
+  const [showThumbnailGenerator, setShowThumbnailGenerator] = useState(false);
+
   // Cleanup on unmount
   React.useEffect(() => {
     return () => {
@@ -870,6 +873,20 @@ const VideoEditor = () => {
 
                 <Separator className="bg-gray-700" />
 
+                {/* Thumbnail Tools */}
+                <div>
+                  <Button
+                    onClick={() => setShowThumbnailGenerator(true)}
+                    className="w-full bg-white text-black hover:bg-gray-200"
+                    size="sm"
+                  >
+                    <Image size={16} className="mr-2" />
+                    Add Thumbnail
+                  </Button>
+                </div>
+
+                <Separator className="bg-gray-700" />
+
                 {/* Caption Tools */}
                 <div>
                   <Button
@@ -911,6 +928,36 @@ const VideoEditor = () => {
             onItemRemove={handleItemRemoval}
           />
         </div>
+
+        {/* Thumbnail Generator Modal */}
+        {showThumbnailGenerator && (
+          <ThumbnailGenerator
+            onClose={() => setShowThumbnailGenerator(false)}
+            onThumbnailGenerated={(thumbnail) => {
+              // Add thumbnail to the thumbnail track
+              const thumbnailMediaFile: MediaFile = {
+                id: Date.now().toString(),
+                file: new File([], 'thumbnail'),
+                type: 'video', // Using video type for thumbnails
+                url: thumbnail.url,
+                duration: 2, // 2 seconds
+                name: `Thumbnail: ${thumbnail.prompt}`,
+                startTime: 0, // Always at the beginning
+                clipDuration: 2,
+                trackPosition: 0
+              };
+
+              setTracks(prev => prev.map(track => 
+                track.id === 'thumbnail-track' 
+                  ? { ...track, items: [thumbnailMediaFile] } // Replace existing thumbnail
+                  : track
+              ));
+
+              setShowThumbnailGenerator(false);
+            }}
+            format={format}
+          />
+        )}
       </div>
     </div>
   );
