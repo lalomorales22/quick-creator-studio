@@ -60,6 +60,20 @@ const VideoEditor = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
+  // Calculate total timeline duration based on all tracks
+  const calculateTimelineDuration = () => {
+    let maxEndTime = 0;
+    tracks.forEach(track => {
+      track.items.forEach(item => {
+        const endTime = item.startTime + item.duration;
+        if (endTime > maxEndTime) {
+          maxEndTime = endTime;
+        }
+      });
+    });
+    return Math.max(maxEndTime, 60); // Minimum 60 seconds
+  };
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files);
@@ -70,42 +84,49 @@ const VideoEditor = () => {
     files.forEach(file => {
       if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
         const url = URL.createObjectURL(file);
-        const mediaFile: MediaFile = {
-          id: Date.now().toString() + Math.random(),
-          file,
-          type: file.type.startsWith('video/') ? 'video' : 'audio',
-          url,
-          duration: 0,
-          name: file.name,
-          startTime: 0,
-          clipDuration: 30,
-          trackPosition: 0
-        };
         
-        setMediaFiles(prev => [...prev, mediaFile]);
+        // Create media element to get duration
+        const mediaElement = file.type.startsWith('video/') 
+          ? document.createElement('video')
+          : document.createElement('audio');
         
-        // Add to appropriate track
-        const trackType = file.type.startsWith('video/') ? 'video' : 'audio';
-        setTracks(prev => prev.map(track => 
-          track.type === trackType 
-            ? { ...track, items: [...track.items, mediaFile] }
-            : track
-        ));
-        
-        // Load the first video file into the player
-        if (file.type.startsWith('video/') && mediaFiles.length === 0) {
-          if (videoRef.current) {
+        mediaElement.src = url;
+        mediaElement.addEventListener('loadedmetadata', () => {
+          const mediaDuration = mediaElement.duration;
+          
+          const mediaFile: MediaFile = {
+            id: Date.now().toString() + Math.random(),
+            file,
+            type: file.type.startsWith('video/') ? 'video' : 'audio',
+            url,
+            duration: mediaDuration,
+            name: file.name,
+            startTime: 0,
+            clipDuration: mediaDuration, // Use actual duration
+            trackPosition: 0 // Will be calculated as percentage later
+          };
+          
+          setMediaFiles(prev => [...prev, mediaFile]);
+          
+          // Add to appropriate track
+          const trackType = file.type.startsWith('video/') ? 'video' : 'audio';
+          setTracks(prev => prev.map(track => 
+            track.type === trackType 
+              ? { ...track, items: [...track.items, mediaFile] }
+              : track
+          ));
+          
+          // Update timeline duration and load first video
+          const newTimelineDuration = calculateTimelineDuration();
+          setDuration(newTimelineDuration);
+          
+          // Load the first available video into the player
+          if (file.type.startsWith('video/') && videoRef.current) {
             videoRef.current.src = url;
-            videoRef.current.addEventListener('loadedmetadata', () => {
-              const videoDuration = videoRef.current!.duration;
-              setDuration(videoDuration);
-              // Update media file with actual duration
-              setMediaFiles(prev => prev.map(mf => 
-                mf.id === mediaFile.id ? { ...mf, duration: videoDuration, clipDuration: Math.min(30, (videoDuration / videoDuration) * 100) } : mf
-              ));
-            });
           }
-        }
+        });
+        
+        mediaElement.load();
       }
     });
   };
@@ -121,8 +142,13 @@ const VideoEditor = () => {
     const videoTracks = tracks.filter(track => track.type === 'video');
     const audioTracks = tracks.filter(track => track.type === 'audio');
     
-    // Play primary video
+    // Play primary video (first available video)
     if (videoRef.current && videoTracks.length > 0 && videoTracks[0].items.length > 0) {
+      // Find the first video file in any video track
+      const firstVideoItem = videoTracks[0].items[0];
+      if (videoRef.current.src !== firstVideoItem.url) {
+        videoRef.current.src = firstVideoItem.url;
+      }
       videoRef.current.play();
     }
     
@@ -172,6 +198,19 @@ const VideoEditor = () => {
       videoRef.current.currentTime = time;
       setCurrentTime(time);
     }
+    
+    // Sync audio elements
+    activeAudioElements.forEach(audio => {
+      audio.currentTime = time;
+    });
+  };
+
+  const handleTracksUpdate = (updatedTracks: Track[]) => {
+    setTracks(updatedTracks);
+    
+    // Recalculate timeline duration
+    const newDuration = calculateTimelineDuration();
+    setDuration(newDuration);
   };
 
   const addCaption = () => {
@@ -195,7 +234,7 @@ const VideoEditor = () => {
       duration: newCaption.endTime - newCaption.startTime,
       name: newCaption.text,
       startTime: newCaption.startTime,
-      clipDuration: ((newCaption.endTime - newCaption.startTime) / duration) * 100,
+      clipDuration: newCaption.endTime - newCaption.startTime,
       trackPosition: (newCaption.startTime / duration) * 100
     };
 
@@ -220,6 +259,12 @@ const VideoEditor = () => {
 
     // Remove from captions if it's a subtitle
     setCaptions(prev => prev.filter(caption => caption.id !== itemId));
+    
+    // Recalculate timeline duration
+    setTimeout(() => {
+      const newDuration = calculateTimelineDuration();
+      setDuration(newDuration);
+    }, 0);
   };
 
   const exportVideo = async () => {
@@ -493,7 +538,7 @@ const VideoEditor = () => {
                       )}
                       <div className="flex-1 truncate">
                         <p className="truncate">{file.name}</p>
-                        <p className="text-gray-400 text-xs">{file.type}</p>
+                        <p className="text-gray-400 text-xs">{file.type} - {Math.round(file.duration)}s</p>
                       </div>
                     </div>
                   </div>
@@ -523,7 +568,8 @@ const VideoEditor = () => {
                     onTimeUpdate={handleTimeUpdate}
                     onLoadedMetadata={() => {
                       if (videoRef.current) {
-                        setDuration(videoRef.current.duration);
+                        const newDuration = Math.max(videoRef.current.duration, calculateTimelineDuration());
+                        setDuration(newDuration);
                       }
                     }}
                   />
@@ -596,7 +642,7 @@ const VideoEditor = () => {
                 duration={duration}
                 currentTime={currentTime}
                 onSeek={handleSeek}
-                onTracksUpdate={setTracks}
+                onTracksUpdate={handleTracksUpdate}
                 onItemRemove={handleItemRemoval}
               />
             </div>

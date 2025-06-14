@@ -1,3 +1,4 @@
+
 import React, { useRef, useState } from 'react';
 import { Video, Volume2, Type, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -44,7 +45,7 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     trackId: string;
     type: 'move' | 'resize-start' | 'resize-end';
     startX: number;
-    initialPosition: number;
+    initialStartTime: number;
     initialDuration: number;
   } | null>(null);
 
@@ -71,7 +72,6 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     onTracksUpdate(tracks.filter(track => track.id !== trackId));
   };
 
-  // Updated removeItem function to use the new prop
   const removeItem = (trackId: string, itemId: string) => {
     onItemRemove(trackId, itemId);
   };
@@ -85,8 +85,8 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
       trackId,
       type,
       startX: e.clientX,
-      initialPosition: item.trackPosition || 0,
-      initialDuration: item.clipDuration || item.duration
+      initialStartTime: item.startTime,
+      initialDuration: item.clipDuration
     });
     setIsDragging(true);
   };
@@ -96,7 +96,7 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
 
     const rect = timelineRef.current.getBoundingClientRect();
     const deltaX = e.clientX - dragData.startX;
-    const deltaPercentage = (deltaX / rect.width) * 100;
+    const deltaTime = (deltaX / rect.width) * duration;
 
     const updatedTracks = tracks.map(track => {
       if (track.id !== dragData.trackId) return track;
@@ -107,22 +107,31 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
           if (item.id !== dragData.itemId) return item;
 
           if (dragData.type === 'move') {
-            const newPosition = Math.max(0, Math.min(100, dragData.initialPosition + deltaPercentage));
-            return { ...item, trackPosition: newPosition };
-          } else if (dragData.type === 'resize-end') {
-            const minDuration = 5; // 5% minimum
-            const newDuration = Math.max(minDuration, dragData.initialDuration + deltaPercentage);
-            return { ...item, clipDuration: Math.min(newDuration, 100 - (item.trackPosition || 0)) };
-          } else if (dragData.type === 'resize-start') {
-            const deltaTime = (deltaPercentage / 100) * duration;
-            const newStartTime = Math.max(0, (item.startTime || 0) + deltaTime);
-            const newPosition = Math.max(0, dragData.initialPosition + deltaPercentage);
-            const newDuration = Math.max(5, dragData.initialDuration - deltaPercentage);
+            const newStartTime = Math.max(0, dragData.initialStartTime + deltaTime);
             return { 
               ...item, 
               startTime: newStartTime,
-              trackPosition: newPosition,
-              clipDuration: newDuration
+              trackPosition: (newStartTime / duration) * 100
+            };
+          } else if (dragData.type === 'resize-end')  {
+            const minDuration = 1; // 1 second minimum
+            const newDuration = Math.max(minDuration, dragData.initialDuration + deltaTime);
+            const maxDuration = duration - item.startTime;
+            return { 
+              ...item, 
+              clipDuration: Math.min(newDuration, Math.min(maxDuration, item.duration))
+            };
+          } else if (dragData.type === 'resize-start') {
+            const newStartTime = Math.max(0, dragData.initialStartTime + deltaTime);
+            const maxStartTimeChange = dragData.initialDuration - 1; // Keep at least 1 second
+            const actualStartTimeChange = Math.min(deltaTime, maxStartTimeChange);
+            const newDuration = dragData.initialDuration - actualStartTimeChange;
+            
+            return { 
+              ...item, 
+              startTime: newStartTime,
+              clipDuration: Math.max(1, newDuration),
+              trackPosition: (newStartTime / duration) * 100
             };
           }
           return item;
@@ -163,6 +172,13 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
   };
 
   const currentTimePercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  // Helper function to convert time to display format
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
@@ -205,15 +221,18 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
         >
           {/* Time markers */}
           <div className="absolute inset-0 flex">
-            {Array.from({ length: 11 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex-1 border-l border-gray-600 text-xs text-gray-400 pl-1"
-                style={{ fontSize: '10px' }}
-              >
-                {i === 0 ? '0:00' : ''}
-              </div>
-            ))}
+            {Array.from({ length: 11 }).map((_, i) => {
+              const timeAtMarker = (duration * i) / 10;
+              return (
+                <div
+                  key={i}
+                  className="flex-1 border-l border-gray-600 text-xs text-gray-400 pl-1"
+                  style={{ fontSize: '10px' }}
+                >
+                  {i === 0 ? formatTime(timeAtMarker) : i === 10 ? formatTime(timeAtMarker) : ''}
+                </div>
+              );
+            })}
           </div>
           
           {/* Playhead */}
@@ -250,8 +269,9 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
             {/* Track Content */}
             <div className="flex-1 h-12 bg-gray-800 rounded relative border border-gray-700">
               {track.items.map((item) => {
-                const itemWidth = item.clipDuration || 30;
-                const itemLeft = item.trackPosition || 0;
+                // Calculate position and width based on actual time
+                const itemLeft = (item.startTime / duration) * 100;
+                const itemWidth = (item.clipDuration / duration) * 100;
                 
                 return (
                   <div
@@ -259,7 +279,8 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                     className="absolute top-1 bottom-1 bg-gray-600 rounded border border-gray-500 flex items-center px-2 cursor-move hover:bg-gray-500 transition-colors group"
                     style={{
                       left: `${itemLeft}%`,
-                      width: `${itemWidth}%`
+                      width: `${itemWidth}%`,
+                      minWidth: '20px' // Ensure items are always visible
                     }}
                     onMouseDown={(e) => handleMouseDown(e, item, track.id, 'move')}
                   >
@@ -272,6 +293,11 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                     {/* Content */}
                     <span className="text-white text-xs truncate flex-1">
                       {item.name}
+                    </span>
+                    
+                    {/* Duration display */}
+                    <span className="text-gray-300 text-xs ml-1">
+                      {Math.round(item.clipDuration)}s
                     </span>
                     
                     {/* Remove button */}
@@ -316,8 +342,8 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
 
       {/* Timeline Footer */}
       <div className="flex justify-between text-xs text-gray-400 mt-2">
-        <span>0:00</span>
-        <span>{Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}</span>
+        <span>{formatTime(0)}</span>
+        <span>{formatTime(duration)}</span>
       </div>
     </div>
   );
