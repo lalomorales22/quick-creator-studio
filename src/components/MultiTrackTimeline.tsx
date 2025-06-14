@@ -1,7 +1,7 @@
-
 import React, { useRef, useState } from 'react';
 import { Video, Volume2, Type, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 interface MediaFile {
   id: string;
@@ -212,139 +212,144 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
         </div>
       </div>
 
-      {/* Timeline Header */}
-      <div className="relative mb-2">
-        <div
-          ref={timelineRef}
-          className="h-6 bg-gray-800 rounded cursor-pointer relative"
-          onClick={handleTimelineClick}
-        >
-          {/* Time markers */}
-          <div className="absolute inset-0 flex">
-            {Array.from({ length: 11 }).map((_, i) => {
-              const timeAtMarker = (duration * i) / 10;
-              return (
-                <div
-                  key={i}
-                  className="flex-1 border-l border-gray-600 text-xs text-gray-400 pl-1"
-                  style={{ fontSize: '10px' }}
-                >
-                  {i === 0 ? formatTime(timeAtMarker) : i === 10 ? formatTime(timeAtMarker) : ''}
-                </div>
-              );
-            })}
+      <ScrollArea className="w-full">
+        <div className="min-w-[800px]">
+          {/* Timeline Header */}
+          <div className="relative mb-2">
+            <div
+              ref={timelineRef}
+              className="h-6 bg-gray-800 rounded cursor-pointer relative"
+              onClick={handleTimelineClick}
+            >
+              {/* Time markers */}
+              <div className="absolute inset-0 flex">
+                {Array.from({ length: 11 }).map((_, i) => {
+                  const timeAtMarker = (duration * i) / 10;
+                  return (
+                    <div
+                      key={i}
+                      className="flex-1 border-l border-gray-600 text-xs text-gray-400 pl-1"
+                      style={{ fontSize: '10px' }}
+                    >
+                      {i === 0 ? formatTime(timeAtMarker) : i === 10 ? formatTime(timeAtMarker) : ''}
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Playhead */}
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-white z-10"
+                style={{ left: `${currentTimePercentage}%` }}
+              >
+                <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rounded-full" />
+              </div>
+            </div>
           </div>
-          
-          {/* Playhead */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-white z-10"
-            style={{ left: `${currentTimePercentage}%` }}
-          >
-            <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rounded-full" />
+
+          {/* Tracks */}
+          <div className="space-y-2">
+            {tracks.map((track) => (
+              <div key={track.id} className="flex items-center gap-3">
+                {/* Track Label */}
+                <div className="w-20 flex items-center gap-2 text-sm flex-shrink-0">
+                  {getTrackIcon(track.type)}
+                  <span className="text-white capitalize text-xs">
+                    {track.type}
+                  </span>
+                  {tracks.filter(t => t.type === track.type).length > 1 && (
+                    <Button
+                      onClick={() => removeTrack(track.id)}
+                      size="sm"
+                      className="w-4 h-4 p-0 bg-red-600 hover:bg-red-700"
+                    >
+                      <X size={10} />
+                    </Button>
+                  )}
+                </div>
+
+                {/* Track Content */}
+                <div className="flex-1 h-12 bg-gray-800 rounded relative border border-gray-700">
+                  {track.items.map((item) => {
+                    // Calculate position and width based on actual time
+                    const itemLeft = (item.startTime / duration) * 100;
+                    const itemWidth = (item.clipDuration / duration) * 100;
+                    
+                    return (
+                      <div
+                        key={item.id}
+                        className="absolute top-1 bottom-1 bg-gray-600 rounded border border-gray-500 flex items-center px-2 cursor-move hover:bg-gray-500 transition-colors group"
+                        style={{
+                          left: `${itemLeft}%`,
+                          width: `${itemWidth}%`,
+                          minWidth: '20px' // Ensure items are always visible
+                        }}
+                        onMouseDown={(e) => handleMouseDown(e, item, track.id, 'move')}
+                      >
+                        {/* Resize handle - start */}
+                        <div
+                          className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                          onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-start')}
+                        />
+                        
+                        {/* Content */}
+                        <span className="text-white text-xs truncate flex-1">
+                          {item.name}
+                        </span>
+                        
+                        {/* Duration display */}
+                        <span className="text-gray-300 text-xs ml-1">
+                          {Math.round(item.clipDuration)}s
+                        </span>
+                        
+                        {/* Remove button */}
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeItem(track.id, item.id);
+                          }}
+                          size="sm"
+                          className="w-4 h-4 p-0 bg-red-600 hover:bg-red-700 opacity-0 group-hover:opacity-100 transition-opacity ml-1"
+                        >
+                          <X size={8} />
+                        </Button>
+                        
+                        {/* Resize handle - end */}
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                          onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-end')}
+                        />
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Empty track indicator */}
+                  {track.items.length === 0 && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-gray-500 text-xs">
+                        Drop {track.type} files here
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Playhead overlay */}
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-white/50"
+                    style={{ left: `${currentTimePercentage}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Timeline Footer */}
+          <div className="flex justify-between text-xs text-gray-400 mt-2">
+            <span>{formatTime(0)}</span>
+            <span>{formatTime(duration)}</span>
           </div>
         </div>
-      </div>
-
-      {/* Tracks */}
-      <div className="space-y-2">
-        {tracks.map((track) => (
-          <div key={track.id} className="flex items-center gap-3">
-            {/* Track Label */}
-            <div className="w-20 flex items-center gap-2 text-sm">
-              {getTrackIcon(track.type)}
-              <span className="text-white capitalize text-xs">
-                {track.type}
-              </span>
-              {tracks.filter(t => t.type === track.type).length > 1 && (
-                <Button
-                  onClick={() => removeTrack(track.id)}
-                  size="sm"
-                  className="w-4 h-4 p-0 bg-red-600 hover:bg-red-700"
-                >
-                  <X size={10} />
-                </Button>
-              )}
-            </div>
-
-            {/* Track Content */}
-            <div className="flex-1 h-12 bg-gray-800 rounded relative border border-gray-700">
-              {track.items.map((item) => {
-                // Calculate position and width based on actual time
-                const itemLeft = (item.startTime / duration) * 100;
-                const itemWidth = (item.clipDuration / duration) * 100;
-                
-                return (
-                  <div
-                    key={item.id}
-                    className="absolute top-1 bottom-1 bg-gray-600 rounded border border-gray-500 flex items-center px-2 cursor-move hover:bg-gray-500 transition-colors group"
-                    style={{
-                      left: `${itemLeft}%`,
-                      width: `${itemWidth}%`,
-                      minWidth: '20px' // Ensure items are always visible
-                    }}
-                    onMouseDown={(e) => handleMouseDown(e, item, track.id, 'move')}
-                  >
-                    {/* Resize handle - start */}
-                    <div
-                      className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"
-                      onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-start')}
-                    />
-                    
-                    {/* Content */}
-                    <span className="text-white text-xs truncate flex-1">
-                      {item.name}
-                    </span>
-                    
-                    {/* Duration display */}
-                    <span className="text-gray-300 text-xs ml-1">
-                      {Math.round(item.clipDuration)}s
-                    </span>
-                    
-                    {/* Remove button */}
-                    <Button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeItem(track.id, item.id);
-                      }}
-                      size="sm"
-                      className="w-4 h-4 p-0 bg-red-600 hover:bg-red-700 opacity-0 group-hover:opacity-100 transition-opacity ml-1"
-                    >
-                      <X size={8} />
-                    </Button>
-                    
-                    {/* Resize handle - end */}
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"
-                      onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-end')}
-                    />
-                  </div>
-                );
-              })}
-              
-              {/* Empty track indicator */}
-              {track.items.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-gray-500 text-xs">
-                    Drop {track.type} files here
-                  </span>
-                </div>
-              )}
-
-              {/* Playhead overlay */}
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-white/50"
-                style={{ left: `${currentTimePercentage}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Timeline Footer */}
-      <div className="flex justify-between text-xs text-gray-400 mt-2">
-        <span>{formatTime(0)}</span>
-        <span>{formatTime(duration)}</span>
-      </div>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
     </div>
   );
 };
