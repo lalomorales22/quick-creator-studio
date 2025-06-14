@@ -1,6 +1,6 @@
 
 import React, { useRef, useState } from 'react';
-import { Video, Volume2, Type, Plus } from 'lucide-react';
+import { Video, Volume2, Type, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface MediaFile {
@@ -10,6 +10,9 @@ interface MediaFile {
   url: string;
   duration: number;
   name: string;
+  startTime: number;
+  clipDuration: number;
+  trackPosition: number;
 }
 
 interface Track {
@@ -35,9 +38,17 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [dragData, setDragData] = useState<{
+    itemId: string;
+    trackId: string;
+    type: 'move' | 'resize-start' | 'resize-end';
+    startX: number;
+    initialPosition: number;
+    initialDuration: number;
+  } | null>(null);
 
   const handleTimelineClick = (e: React.MouseEvent) => {
-    if (!timelineRef.current || isDragging) return;
+    if (!timelineRef.current || isDragging || dragData) return;
     
     const rect = timelineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -54,6 +65,92 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     };
     onTracksUpdate([...tracks, newTrack]);
   };
+
+  const removeTrack = (trackId: string) => {
+    onTracksUpdate(tracks.filter(track => track.id !== trackId));
+  };
+
+  const removeItem = (trackId: string, itemId: string) => {
+    const updatedTracks = tracks.map(track => 
+      track.id === trackId 
+        ? { ...track, items: track.items.filter(item => item.id !== itemId) }
+        : track
+    );
+    onTracksUpdate(updatedTracks);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent, item: MediaFile, trackId: string, type: 'move' | 'resize-start' | 'resize-end') => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setDragData({
+      itemId: item.id,
+      trackId,
+      type,
+      startX: e.clientX,
+      initialPosition: item.trackPosition || 0,
+      initialDuration: item.clipDuration || item.duration
+    });
+    setIsDragging(true);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!dragData || !timelineRef.current) return;
+
+    const rect = timelineRef.current.getBoundingClientRect();
+    const deltaX = e.clientX - dragData.startX;
+    const deltaPercentage = (deltaX / rect.width) * 100;
+
+    const updatedTracks = tracks.map(track => {
+      if (track.id !== dragData.trackId) return track;
+      
+      return {
+        ...track,
+        items: track.items.map(item => {
+          if (item.id !== dragData.itemId) return item;
+
+          if (dragData.type === 'move') {
+            const newPosition = Math.max(0, Math.min(100, dragData.initialPosition + deltaPercentage));
+            return { ...item, trackPosition: newPosition };
+          } else if (dragData.type === 'resize-end') {
+            const minDuration = 5; // 5% minimum
+            const newDuration = Math.max(minDuration, dragData.initialDuration + deltaPercentage);
+            return { ...item, clipDuration: Math.min(newDuration, 100 - (item.trackPosition || 0)) };
+          } else if (dragData.type === 'resize-start') {
+            const deltaTime = (deltaPercentage / 100) * duration;
+            const newStartTime = Math.max(0, (item.startTime || 0) + deltaTime);
+            const newPosition = Math.max(0, dragData.initialPosition + deltaPercentage);
+            const newDuration = Math.max(5, dragData.initialDuration - deltaPercentage);
+            return { 
+              ...item, 
+              startTime: newStartTime,
+              trackPosition: newPosition,
+              clipDuration: newDuration
+            };
+          }
+          return item;
+        })
+      };
+    });
+
+    onTracksUpdate(updatedTracks);
+  };
+
+  const handleMouseUp = () => {
+    setDragData(null);
+    setIsDragging(false);
+  };
+
+  React.useEffect(() => {
+    if (dragData) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [dragData]);
 
   const getTrackIcon = (type: string) => {
     switch (type) {
@@ -142,24 +239,64 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
               <span className="text-white capitalize text-xs">
                 {track.type}
               </span>
+              {tracks.filter(t => t.type === track.type).length > 1 && (
+                <Button
+                  onClick={() => removeTrack(track.id)}
+                  size="sm"
+                  className="w-4 h-4 p-0 bg-red-600 hover:bg-red-700"
+                >
+                  <X size={10} />
+                </Button>
+              )}
             </div>
 
             {/* Track Content */}
             <div className="flex-1 h-12 bg-gray-800 rounded relative border border-gray-700">
-              {track.items.map((item, index) => (
-                <div
-                  key={item.id}
-                  className="absolute top-1 bottom-1 bg-gray-600 rounded border border-gray-500 flex items-center px-2"
-                  style={{
-                    left: `${index * 20}%`,
-                    width: `${Math.min(30, 80 - index * 20)}%`
-                  }}
-                >
-                  <span className="text-white text-xs truncate">
-                    {item.name}
-                  </span>
-                </div>
-              ))}
+              {track.items.map((item) => {
+                const itemWidth = item.clipDuration || 30;
+                const itemLeft = item.trackPosition || 0;
+                
+                return (
+                  <div
+                    key={item.id}
+                    className="absolute top-1 bottom-1 bg-gray-600 rounded border border-gray-500 flex items-center px-2 cursor-move hover:bg-gray-500 transition-colors group"
+                    style={{
+                      left: `${itemLeft}%`,
+                      width: `${itemWidth}%`
+                    }}
+                    onMouseDown={(e) => handleMouseDown(e, item, track.id, 'move')}
+                  >
+                    {/* Resize handle - start */}
+                    <div
+                      className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                      onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-start')}
+                    />
+                    
+                    {/* Content */}
+                    <span className="text-white text-xs truncate flex-1">
+                      {item.name}
+                    </span>
+                    
+                    {/* Remove button */}
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeItem(track.id, item.id);
+                      }}
+                      size="sm"
+                      className="w-4 h-4 p-0 bg-red-600 hover:bg-red-700 opacity-0 group-hover:opacity-100 transition-opacity ml-1"
+                    >
+                      <X size={8} />
+                    </Button>
+                    
+                    {/* Resize handle - end */}
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                      onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-end')}
+                    />
+                  </div>
+                );
+              })}
               
               {/* Empty track indicator */}
               {track.items.length === 0 && (
