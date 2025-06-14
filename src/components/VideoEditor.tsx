@@ -296,14 +296,16 @@ const VideoEditor = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // Set canvas size based on format
+      // Set canvas size based on format - FIXED to properly handle vertical format
       if (format === '16:9') {
         canvas.width = 1920;
         canvas.height = 1080;
-      } else {
+      } else { // 9:16 vertical format
         canvas.width = 1080;
         canvas.height = 1920;
       }
+
+      console.log(`Canvas dimensions set to: ${canvas.width}x${canvas.height} for format ${format}`);
 
       // Create video element for the main video track
       const sourceVideo = document.createElement('video');
@@ -371,49 +373,58 @@ const VideoEditor = () => {
         const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
         const url = URL.createObjectURL(mp4Blob);
         
-        // Create download link
+        // Create download link with format in filename
+        const formatSuffix = format === '16:9' ? 'widescreen' : 'vertical';
         const a = document.createElement('a');
         a.href = url;
-        a.download = `exported-video-${Date.now()}.mp4`;
+        a.download = `exported-video-${formatSuffix}-${Date.now()}.mp4`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         
         URL.revokeObjectURL(url);
-        console.log('Video export completed');
+        console.log(`Video export completed in ${format} format`);
         setIsExporting(false);
       };
 
       // Start recording
       mediaRecorder.start();
       
-      // Render video frames to canvas
+      // Render video frames to canvas - FIXED scaling logic for vertical format
       const renderFrame = () => {
         if (!ctx || !sourceVideo) return;
         
-        // Clear canvas
+        // Clear canvas with black background
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Draw video frame
+        // Draw video frame with proper scaling for the selected format
         if (sourceVideo.videoWidth > 0 && sourceVideo.videoHeight > 0) {
-          // Calculate scaling to fit the format
           const videoAspect = sourceVideo.videoWidth / sourceVideo.videoHeight;
           const canvasAspect = canvas.width / canvas.height;
           
           let drawWidth, drawHeight, drawX, drawY;
           
-          if (videoAspect > canvasAspect) {
-            // Video is wider than canvas
-            drawWidth = canvas.width;
-            drawHeight = canvas.width / videoAspect;
-            drawX = 0;
-            drawY = (canvas.height - drawHeight) / 2;
+          if (format === '16:9') {
+            // Widescreen format (1920x1080)
+            if (videoAspect > canvasAspect) {
+              // Video is wider than canvas
+              drawWidth = canvas.width;
+              drawHeight = canvas.width / videoAspect;
+              drawX = 0;
+              drawY = (canvas.height - drawHeight) / 2;
+            } else {
+              // Video is taller than canvas
+              drawHeight = canvas.height;
+              drawWidth = canvas.height * videoAspect;
+              drawX = (canvas.width - drawWidth) / 2;
+              drawY = 0;
+            }
           } else {
-            // Video is taller than canvas
+            // Vertical format (1080x1920) - force fit to vertical canvas
+            drawWidth = canvas.width;
             drawHeight = canvas.height;
-            drawWidth = canvas.height * videoAspect;
-            drawX = (canvas.width - drawWidth) / 2;
+            drawX = 0;
             drawY = 0;
           }
           
