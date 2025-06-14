@@ -17,15 +17,15 @@ const FormatToggle: React.FC<FormatToggleProps> = ({ format, onFormatChange }) =
         onClick={() => onFormatChange('16:9')}
         className={`transition-all duration-300 ${
           format === '16:9' 
-            ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg scale-105' 
-            : 'bg-purple-900/30 border-purple-500/50 text-purple-200 hover:bg-purple-800/50'
+            ? 'bg-white text-black hover:bg-gray-200' 
+            : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'
         }`}
       >
         <Maximize2 size={16} className="mr-2" />
         Widescreen (16:9)
       </Button>
       
-      <div className="w-px h-6 bg-purple-500/30" />
+      <div className="w-px h-6 bg-gray-600" />
       
       <Button
         variant={format === '9:16' ? 'default' : 'outline'}
@@ -33,8 +33,8 @@ const FormatToggle: React.FC<FormatToggleProps> = ({ format, onFormatChange }) =
         onClick={() => onFormatChange('9:16')}
         className={`transition-all duration-300 ${
           format === '9:16' 
-            ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg scale-105' 
-            : 'bg-purple-900/30 border-purple-500/50 text-purple-200 hover:bg-purple-800/50'
+            ? 'bg-white text-black hover:bg-gray-200' 
+            : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'
         }`}
       >
         <Smartphone size={16} className="mr-2" />
