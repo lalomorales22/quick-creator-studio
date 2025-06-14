@@ -486,7 +486,8 @@ const VideoEditor = () => {
           <p className="text-gray-400">Professional video editing made simple</p>
         </div>
 
-        <div className="grid grid-cols-12 gap-6">
+        {/* Main Content - Three Column Layout */}
+        <div className="grid grid-cols-12 gap-6 mb-6">
           {/* Left Sidebar - Media Library */}
           <div className="col-span-3">
             <Card className="p-4 bg-gray-900 border-gray-700">
@@ -634,18 +635,6 @@ const VideoEditor = () => {
                 </div>
               </div>
             </Card>
-
-            {/* Multi-Track Timeline */}
-            <div className="mt-6">
-              <MultiTrackTimeline
-                tracks={tracks}
-                duration={duration}
-                currentTime={currentTime}
-                onSeek={handleSeek}
-                onTracksUpdate={handleTracksUpdate}
-                onItemRemove={handleItemRemoval}
-              />
-            </div>
           </div>
 
           {/* Right Sidebar - Tools */}
@@ -717,6 +706,18 @@ const VideoEditor = () => {
               </div>
             </Card>
           </div>
+        </div>
+
+        {/* Multi-Track Timeline - Full Width */}
+        <div className="w-full">
+          <MultiTrackTimeline
+            tracks={tracks}
+            duration={duration}
+            currentTime={currentTime}
+            onSeek={handleSeek}
+            onTracksUpdate={handleTracksUpdate}
+            onItemRemove={handleItemRemoval}
+          />
         </div>
       </div>
     </div>
