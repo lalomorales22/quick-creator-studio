@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Upload, Play, Pause, Scissors, Download, Type, Maximize2, Smartphone } from 'lucide-react';
+import { Upload, Play, Pause, Scissors, Download, Type, Maximize2, Smartphone, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import MultiTrackTimeline from './MultiTrackTimeline';
 import CaptionOverlay from './CaptionOverlay';
 import FormatToggle from './FormatToggle';
+import ThumbnailGenerator from './ThumbnailGenerator';
 
 interface MediaFile {
   id: string;

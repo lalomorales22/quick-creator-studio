@@ -6,13 +6,17 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 interface MediaFile {
   id: string;
   file: File;
-  type: 'video' | 'audio';
+  type: 'video' | 'audio' | 'thumbnail';
   url: string;
   duration: number;
   name: string;
   startTime: number;
   clipDuration: number;
   trackPosition: number;
+  thumbnailData?: {
+    type: 'ai' | 'upload';
+    prompt?: string;
+  };
 }
 
 interface Track {
@@ -171,6 +175,13 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     }
   };
 
+  const getTrackLabel = (track: Track) => {
+    if (track.id === 'thumbnail-track') {
+      return 'Thumbnail';
+    }
+    return track.type.charAt(0).toUpperCase() + track.type.slice(1);
+  };
+
   const currentTimePercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   // Helper function to convert time to display format
@@ -255,9 +266,9 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                 <div className="w-20 flex items-center gap-2 text-sm flex-shrink-0">
                   {getTrackIcon(track.type)}
                   <span className="text-white capitalize text-xs">
-                    {track.type}
+                    {getTrackLabel(track)}
                   </span>
-                  {tracks.filter(t => t.type === track.type).length > 1 && (
+                  {tracks.filter(t => t.type === track.type).length > 1 && track.id !== 'thumbnail-track' && (
                     <Button
                       onClick={() => removeTrack(track.id)}
                       size="sm"
@@ -271,18 +282,21 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                 {/* Track Content */}
                 <div className="flex-1 h-12 bg-gray-800 rounded relative border border-gray-700">
                   {track.items.map((item) => {
-                    // Calculate position and width based on actual time
                     const itemLeft = (item.startTime / duration) * 100;
                     const itemWidth = (item.clipDuration / duration) * 100;
                     
                     return (
                       <div
                         key={item.id}
-                        className="absolute top-1 bottom-1 bg-gray-600 rounded border border-gray-500 flex items-center px-2 cursor-move hover:bg-gray-500 transition-colors group"
+                        className={`absolute top-1 bottom-1 rounded border flex items-center px-2 cursor-move transition-colors group ${
+                          item.type === 'thumbnail' 
+                            ? 'bg-purple-600 border-purple-500 hover:bg-purple-500' 
+                            : 'bg-gray-600 border-gray-500 hover:bg-gray-500'
+                        }`}
                         style={{
                           left: `${itemLeft}%`,
                           width: `${itemWidth}%`,
-                          minWidth: '20px' // Ensure items are always visible
+                          minWidth: '20px'
                         }}
                         onMouseDown={(e) => handleMouseDown(e, item, track.id, 'move')}
                       >
@@ -292,15 +306,37 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                           onMouseDown={(e) => handleMouseDown(e, item, track.id, 'resize-start')}
                         />
                         
-                        {/* Content */}
-                        <span className="text-white text-xs truncate flex-1">
-                          {item.name}
-                        </span>
+                        {/* Content with thumbnail preview */}
+                        {item.type === 'thumbnail' && (
+                          <div className="flex items-center gap-2 flex-1">
+                            <img 
+                              src={item.url} 
+                              alt="Thumbnail" 
+                              className="w-6 h-6 rounded object-cover"
+                            />
+                            <span className="text-white text-xs truncate">
+                              {item.thumbnailData?.type === 'ai' ? '🤖' : '📁'} {item.name}
+                            </span>
+                          </div>
+                        )}
                         
-                        {/* Duration display */}
-                        <span className="text-gray-300 text-xs ml-1">
-                          {Math.round(item.clipDuration)}s
-                        </span>
+                        {item.type !== 'thumbnail' && (
+                          <>
+                            <span className="text-white text-xs truncate flex-1">
+                              {item.name}
+                            </span>
+                            <span className="text-gray-300 text-xs ml-1">
+                              {Math.round(item.clipDuration)}s
+                            </span>
+                          </>
+                        )}
+                        
+                        {/* Duration display for thumbnails */}
+                        {item.type === 'thumbnail' && (
+                          <span className="text-gray-200 text-xs ml-1">
+                            {Math.round(item.clipDuration)}s
+                          </span>
+                        )}
                         
                         {/* Remove button */}
                         <Button
@@ -327,7 +363,7 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                   {track.items.length === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <span className="text-gray-500 text-xs">
-                        Drop {track.type} files here
+                        {track.id === 'thumbnail-track' ? 'Add thumbnail here' : `Drop ${track.type} files here`}
                       </span>
                     </div>
                   )}
