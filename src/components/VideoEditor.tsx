@@ -185,6 +185,41 @@ const VideoEditor = () => {
     };
     setCaptions(prev => [...prev, newCaption]);
     setSelectedCaption(newCaption.id);
+
+    // Add caption as a subtitle track item
+    const captionMediaFile: MediaFile = {
+      id: newCaption.id,
+      file: new File([], 'caption'),
+      type: 'audio', // Using audio type as placeholder since we need MediaFile structure
+      url: '',
+      duration: newCaption.endTime - newCaption.startTime,
+      name: newCaption.text,
+      startTime: newCaption.startTime,
+      clipDuration: ((newCaption.endTime - newCaption.startTime) / duration) * 100,
+      trackPosition: (newCaption.startTime / duration) * 100
+    };
+
+    setTracks(prev => prev.map(track => 
+      track.type === 'subtitle' 
+        ? { ...track, items: [...track.items, captionMediaFile] }
+        : track
+    ));
+  };
+
+  // New function to handle item removal from both timeline and media library
+  const handleItemRemoval = (trackId: string, itemId: string) => {
+    // Remove from tracks
+    setTracks(prev => prev.map(track => 
+      track.id === trackId 
+        ? { ...track, items: track.items.filter(item => item.id !== itemId) }
+        : track
+    ));
+
+    // Remove from media files if it's a video or audio file
+    setMediaFiles(prev => prev.filter(file => file.id !== itemId));
+
+    // Remove from captions if it's a subtitle
+    setCaptions(prev => prev.filter(caption => caption.id !== itemId));
   };
 
   const exportVideo = async () => {
@@ -562,6 +597,7 @@ const VideoEditor = () => {
                 currentTime={currentTime}
                 onSeek={handleSeek}
                 onTracksUpdate={setTracks}
+                onItemRemove={handleItemRemoval}
               />
             </div>
           </div>

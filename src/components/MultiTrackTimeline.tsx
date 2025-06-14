@@ -1,4 +1,3 @@
-
 import React, { useRef, useState } from 'react';
 import { Video, Volume2, Type, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +26,7 @@ interface MultiTrackTimelineProps {
   currentTime: number;
   onSeek: (time: number) => void;
   onTracksUpdate: (tracks: Track[]) => void;
+  onItemRemove: (trackId: string, itemId: string) => void;
 }
 
 const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
@@ -34,7 +34,8 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
   duration,
   currentTime,
   onSeek,
-  onTracksUpdate
+  onTracksUpdate,
+  onItemRemove
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -70,13 +71,9 @@ const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     onTracksUpdate(tracks.filter(track => track.id !== trackId));
   };
 
+  // Updated removeItem function to use the new prop
   const removeItem = (trackId: string, itemId: string) => {
-    const updatedTracks = tracks.map(track => 
-      track.id === trackId 
-        ? { ...track, items: track.items.filter(item => item.id !== itemId) }
-        : track
-    );
-    onTracksUpdate(updatedTracks);
+    onItemRemove(trackId, itemId);
   };
 
   const handleMouseDown = (e: React.MouseEvent, item: MediaFile, trackId: string, type: 'move' | 'resize-start' | 'resize-end') => {
