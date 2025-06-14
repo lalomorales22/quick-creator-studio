@@ -19,6 +19,7 @@ interface MediaFile {
   startTime: number;
   clipDuration: number;
   trackPosition: number;
+  clipStartOffset?: number; // New: offset within the original media file
 }
 
 interface Caption {
@@ -65,7 +66,7 @@ const VideoEditor = () => {
     let maxEndTime = 0;
     tracks.forEach(track => {
       track.items.forEach(item => {
-        const endTime = item.startTime + item.duration;
+        const endTime = item.startTime + item.clipDuration;
         if (endTime > maxEndTime) {
           maxEndTime = endTime;
         }
@@ -103,7 +104,8 @@ const VideoEditor = () => {
             name: file.name,
             startTime: 0,
             clipDuration: mediaDuration, // Use actual duration
-            trackPosition: 0 // Will be calculated as percentage later
+            trackPosition: 0, // Will be calculated as percentage later
+            clipStartOffset: 0 // Start from beginning of original file
           };
           
           setMediaFiles(prev => [...prev, mediaFile]);
@@ -142,25 +144,60 @@ const VideoEditor = () => {
     const videoTracks = tracks.filter(track => track.type === 'video');
     const audioTracks = tracks.filter(track => track.type === 'audio');
     
-    // Play primary video (first available video)
+    // Play primary video with clipping support
     if (videoRef.current && videoTracks.length > 0 && videoTracks[0].items.length > 0) {
       // Find the first video file in any video track
       const firstVideoItem = videoTracks[0].items[0];
       if (videoRef.current.src !== firstVideoItem.url) {
         videoRef.current.src = firstVideoItem.url;
       }
+      
+      // Set video start time to the clipped offset
+      const videoClipOffset = firstVideoItem.clipStartOffset || 0;
+      videoRef.current.currentTime = videoClipOffset + (currentTime - firstVideoItem.startTime);
       videoRef.current.play();
+      
+      // Set up event listener to stop video when clip ends
+      const handleVideoTimeUpdate = () => {
+        if (!videoRef.current) return;
+        
+        const relativeTime = currentTime - firstVideoItem.startTime;
+        const actualVideoTime = videoClipOffset + relativeTime;
+        
+        // Stop if we've reached the end of the clip
+        if (relativeTime >= firstVideoItem.clipDuration || actualVideoTime >= videoClipOffset + firstVideoItem.clipDuration) {
+          videoRef.current.pause();
+        }
+      };
+      
+      videoRef.current.addEventListener('timeupdate', handleVideoTimeUpdate);
     }
     
-    // Play audio tracks and keep track of them
+    // Play audio tracks with clipping support
     const newAudioElements: HTMLAudioElement[] = [];
     audioTracks.forEach(track => {
       track.items.forEach(item => {
-        const audio = new Audio(item.url);
-        audio.currentTime = item.startTime || 0;
-        audio.volume = (volume[0] / 100);
-        audio.play();
-        newAudioElements.push(audio);
+        // Only play audio if current timeline position is within the clip
+        if (currentTime >= item.startTime && currentTime < item.startTime + item.clipDuration) {
+          const audio = new Audio(item.url);
+          const clipOffset = item.clipStartOffset || 0;
+          const relativeTime = currentTime - item.startTime;
+          
+          audio.currentTime = clipOffset + relativeTime;
+          audio.volume = (volume[0] / 100);
+          
+          // Set up event listener to stop audio when clip ends
+          const handleAudioTimeUpdate = () => {
+            const currentRelativeTime = currentTime - item.startTime;
+            if (currentRelativeTime >= item.clipDuration) {
+              audio.pause();
+            }
+          };
+          
+          audio.addEventListener('timeupdate', handleAudioTimeUpdate);
+          audio.play();
+          newAudioElements.push(audio);
+        }
       });
     });
     
@@ -194,15 +231,30 @@ const VideoEditor = () => {
   };
 
   const handleSeek = (time: number) => {
+    setCurrentTime(time);
+    
+    // Update video position with clipping support
     if (videoRef.current) {
-      videoRef.current.currentTime = time;
-      setCurrentTime(time);
+      const videoTracks = tracks.filter(track => track.type === 'video');
+      if (videoTracks.length > 0 && videoTracks[0].items.length > 0) {
+        const videoItem = videoTracks[0].items[0];
+        if (time >= videoItem.startTime && time < videoItem.startTime + videoItem.clipDuration) {
+          const clipOffset = videoItem.clipStartOffset || 0;
+          const relativeTime = time - videoItem.startTime;
+          videoRef.current.currentTime = clipOffset + relativeTime;
+        }
+      }
     }
     
-    // Sync audio elements
+    // Sync audio elements with clipping support
     activeAudioElements.forEach(audio => {
-      audio.currentTime = time;
+      audio.pause();
     });
+    
+    // Restart audio from new position if playing
+    if (isPlaying) {
+      playMultipleTracks();
+    }
   };
 
   const handleTracksUpdate = (updatedTracks: Track[]) => {
@@ -281,7 +333,7 @@ const VideoEditor = () => {
         return;
       }
 
-      console.log('Starting video export with settings:', {
+      console.log('Starting video export with clipping support:', {
         format,
         trimStart,
         trimEnd,
@@ -307,9 +359,10 @@ const VideoEditor = () => {
 
       console.log(`Canvas dimensions set to: ${canvas.width}x${canvas.height} for format ${format}`);
 
-      // Create video element for the main video track
+      // Create video element for the main video track with clipping
       const sourceVideo = document.createElement('video');
-      sourceVideo.src = videoTracks[0].items[0].url;
+      const videoItem = videoTracks[0].items[0];
+      sourceVideo.src = videoItem.url;
       sourceVideo.muted = true; // We'll handle audio separately
       
       await new Promise((resolve) => {
@@ -317,11 +370,11 @@ const VideoEditor = () => {
         sourceVideo.load();
       });
 
-      // Create audio context for mixing audio tracks
+      // Create audio context for mixing audio tracks with clipping
       const audioContext = new AudioContext();
       const destination = audioContext.createMediaStreamDestination();
       
-      // Add audio tracks to the mix
+      // Add audio tracks to the mix with proper clipping
       const audioSources = await Promise.all(
         audioTracks.flatMap(track => 
           track.items.map(async (item) => {
@@ -338,22 +391,19 @@ const VideoEditor = () => {
             source.connect(gainNode);
             gainNode.connect(destination);
             
-            return { audioElement, source, gainNode };
+            return { audioElement, source, gainNode, item };
           })
         )
       );
 
-      // Get canvas stream and add audio
       const canvasStream = canvas.captureStream(30);
       
-      // Add mixed audio to video stream
       if (destination.stream.getAudioTracks().length > 0) {
         destination.stream.getAudioTracks().forEach(track => {
           canvasStream.addTrack(track);
         });
       }
 
-      // Create MediaRecorder for final output
       const mediaRecorder = new MediaRecorder(canvasStream, {
         mimeType: 'video/webm; codecs=vp9,opus'
       });
@@ -368,8 +418,6 @@ const VideoEditor = () => {
       
       mediaRecorder.onstop = async () => {
         const webmBlob = new Blob(chunks, { type: 'video/webm' });
-        
-        // Convert to MP4 using a simple approach (note: for production use, you'd want a proper converter)
         const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
         const url = URL.createObjectURL(mp4Blob);
         
@@ -383,45 +431,55 @@ const VideoEditor = () => {
         document.body.removeChild(a);
         
         URL.revokeObjectURL(url);
-        console.log(`Video export completed in ${format} format`);
+        console.log(`Video export completed in ${format} format with clipping`);
         setIsExporting(false);
       };
 
-      // Start recording
       mediaRecorder.start();
       
-      // Render video frames to canvas - FIXED scaling logic for vertical format
-      const renderFrame = () => {
+      // Set video to start at clip offset
+      const videoClipOffset = videoItem.clipStartOffset || 0;
+      sourceVideo.currentTime = videoClipOffset;
+      
+      // Set audio to start at their respective clip offsets
+      audioSources.forEach(({ audioElement, item }) => {
+        const clipOffset = item.clipStartOffset || 0;
+        audioElement.currentTime = clipOffset;
+      });
+      
+      sourceVideo.play();
+      audioSources.forEach(({ audioElement }) => {
+        audioElement.play();
+      });
+      
+      // Render frames with clipping awareness
+      let exportTime = 0;
+      const frameInterval = setInterval(() => {
         if (!ctx || !sourceVideo) return;
         
-        // Clear canvas with black background
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Draw video frame with proper scaling for the selected format
-        if (sourceVideo.videoWidth > 0 && sourceVideo.videoHeight > 0) {
+        // Only draw video if we're within the clipped duration
+        if (exportTime <= videoItem.clipDuration && sourceVideo.videoWidth > 0 && sourceVideo.videoHeight > 0) {
           const videoAspect = sourceVideo.videoWidth / sourceVideo.videoHeight;
           const canvasAspect = canvas.width / canvas.height;
           
           let drawWidth, drawHeight, drawX, drawY;
           
           if (format === '16:9') {
-            // Widescreen format (1920x1080)
             if (videoAspect > canvasAspect) {
-              // Video is wider than canvas
               drawWidth = canvas.width;
               drawHeight = canvas.width / videoAspect;
               drawX = 0;
               drawY = (canvas.height - drawHeight) / 2;
             } else {
-              // Video is taller than canvas
               drawHeight = canvas.height;
               drawWidth = canvas.height * videoAspect;
               drawX = (canvas.width - drawWidth) / 2;
               drawY = 0;
             }
           } else {
-            // Vertical format (1080x1920) - force fit to vertical canvas
             drawWidth = canvas.width;
             drawHeight = canvas.height;
             drawX = 0;
@@ -433,7 +491,7 @@ const VideoEditor = () => {
         
         // Add captions overlay
         captions.forEach(caption => {
-          if (sourceVideo.currentTime >= caption.startTime && sourceVideo.currentTime <= caption.endTime) {
+          if (exportTime >= caption.startTime && exportTime <= caption.endTime) {
             ctx.fillStyle = '#ffffff';
             ctx.strokeStyle = '#000000';
             ctx.font = 'bold 48px Arial';
@@ -447,37 +505,21 @@ const VideoEditor = () => {
             ctx.fillText(caption.text, x, y);
           }
         });
-      };
-
-      // Start video playback and sync audio
-      sourceVideo.currentTime = 0;
-      audioSources.forEach(({ audioElement }) => {
-        audioElement.currentTime = 0;
-      });
-      
-      sourceVideo.play();
-      audioSources.forEach(({ audioElement }) => {
-        audioElement.play();
-      });
-      
-      // Render frames
-      const frameInterval = setInterval(() => {
-        renderFrame();
         
-        // Stop recording when video ends or after a reasonable duration
-        if (sourceVideo.ended || sourceVideo.currentTime >= Math.min(sourceVideo.duration, 30)) {
+        exportTime += 1/30; // 30 FPS
+        
+        // Stop recording when we've exported the clipped duration or reasonable limit
+        if (exportTime >= Math.min(videoItem.clipDuration, 30)) {
           clearInterval(frameInterval);
           mediaRecorder.stop();
           
-          // Stop audio playback
           audioSources.forEach(({ audioElement }) => {
             audioElement.pause();
           });
           
-          // Close audio context
           audioContext.close();
         }
-      }, 1000 / 30); // 30 FPS
+      }, 1000 / 30);
       
     } catch (error) {
       console.error('Export failed:', error);
