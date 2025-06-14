@@ -60,6 +60,10 @@ const VideoEditor = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  
+  // New refs for timeline playback tracking
+  const timelineIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const playbackStartTimeRef = useRef<number>(0);
 
   // Calculate total timeline duration based on all tracks
   const calculateTimelineDuration = () => {
@@ -133,47 +137,48 @@ const VideoEditor = () => {
     });
   };
 
-  const playMultipleTracks = () => {
-    // Stop any currently playing audio
+  const stopAllAudio = () => {
     activeAudioElements.forEach(audio => {
       audio.pause();
       audio.currentTime = 0;
     });
+    setActiveAudioElements([]);
+  };
+
+  const playMultipleTracks = () => {
+    // Stop any currently playing audio
+    stopAllAudio();
+    
+    // Clear any existing timeline interval
+    if (timelineIntervalRef.current) {
+      clearInterval(timelineIntervalRef.current);
+    }
     
     // Get all video and audio tracks that should play at current time
     const videoTracks = tracks.filter(track => track.type === 'video');
     const audioTracks = tracks.filter(track => track.type === 'audio');
     
+    // Record playback start time for timeline sync
+    playbackStartTimeRef.current = Date.now();
+    const startTimelinePosition = currentTime;
+    
     // Play primary video with clipping support
     if (videoRef.current && videoTracks.length > 0 && videoTracks[0].items.length > 0) {
-      // Find the first video file in any video track
       const firstVideoItem = videoTracks[0].items[0];
       if (videoRef.current.src !== firstVideoItem.url) {
         videoRef.current.src = firstVideoItem.url;
       }
       
-      // Set video start time to the clipped offset
-      const videoClipOffset = firstVideoItem.clipStartOffset || 0;
-      videoRef.current.currentTime = videoClipOffset + (currentTime - firstVideoItem.startTime);
-      videoRef.current.play();
-      
-      // Set up event listener to stop video when clip ends
-      const handleVideoTimeUpdate = () => {
-        if (!videoRef.current) return;
-        
+      // Only play video if current timeline position is within the clip
+      if (currentTime >= firstVideoItem.startTime && currentTime < firstVideoItem.startTime + firstVideoItem.clipDuration) {
+        const videoClipOffset = firstVideoItem.clipStartOffset || 0;
         const relativeTime = currentTime - firstVideoItem.startTime;
-        const actualVideoTime = videoClipOffset + relativeTime;
-        
-        // Stop if we've reached the end of the clip
-        if (relativeTime >= firstVideoItem.clipDuration || actualVideoTime >= videoClipOffset + firstVideoItem.clipDuration) {
-          videoRef.current.pause();
-        }
-      };
-      
-      videoRef.current.addEventListener('timeupdate', handleVideoTimeUpdate);
+        videoRef.current.currentTime = videoClipOffset + relativeTime;
+        videoRef.current.play();
+      }
     }
     
-    // Play audio tracks with clipping support
+    // Play audio tracks with proper clipping support
     const newAudioElements: HTMLAudioElement[] = [];
     audioTracks.forEach(track => {
       track.items.forEach(item => {
@@ -186,15 +191,8 @@ const VideoEditor = () => {
           audio.currentTime = clipOffset + relativeTime;
           audio.volume = (volume[0] / 100);
           
-          // Set up event listener to stop audio when clip ends
-          const handleAudioTimeUpdate = () => {
-            const currentRelativeTime = currentTime - item.startTime;
-            if (currentRelativeTime >= item.clipDuration) {
-              audio.pause();
-            }
-          };
+          console.log(`Playing audio clip: ${item.name}, timeline: ${currentTime}s, clip start: ${item.startTime}s, clip duration: ${item.clipDuration}s, audio time: ${audio.currentTime}s`);
           
-          audio.addEventListener('timeupdate', handleAudioTimeUpdate);
           audio.play();
           newAudioElements.push(audio);
         }
@@ -202,6 +200,72 @@ const VideoEditor = () => {
     });
     
     setActiveAudioElements(newAudioElements);
+    
+    // Start timeline update interval for proper clipping enforcement
+    timelineIntervalRef.current = setInterval(() => {
+      const elapsedTime = (Date.now() - playbackStartTimeRef.current) / 1000;
+      const newTimelinePosition = startTimelinePosition + elapsedTime;
+      
+      setCurrentTime(newTimelinePosition);
+      
+      // Check if any audio clips should stop
+      let shouldStopAudio = false;
+      audioTracks.forEach(track => {
+        track.items.forEach(item => {
+          const clipEndTime = item.startTime + item.clipDuration;
+          if (newTimelinePosition >= clipEndTime && newTimelinePosition - 0.1 <= clipEndTime) {
+            shouldStopAudio = true;
+            console.log(`Stopping audio clip: ${item.name} at timeline ${newTimelinePosition}s (clip ends at ${clipEndTime}s)`);
+          }
+        });
+      });
+      
+      // Check if video clip should stop
+      if (videoTracks.length > 0 && videoTracks[0].items.length > 0) {
+        const videoItem = videoTracks[0].items[0];
+        const videoClipEndTime = videoItem.startTime + videoItem.clipDuration;
+        if (newTimelinePosition >= videoClipEndTime && videoRef.current && !videoRef.current.paused) {
+          videoRef.current.pause();
+          console.log(`Stopping video clip at timeline ${newTimelinePosition}s (clip ends at ${videoClipEndTime}s)`);
+        }
+      }
+      
+      if (shouldStopAudio) {
+        // Stop audio that should no longer be playing
+        const updatedAudioElements = activeAudioElements.filter(audio => {
+          let shouldKeepPlaying = false;
+          audioTracks.forEach(track => {
+            track.items.forEach(item => {
+              if (newTimelinePosition >= item.startTime && newTimelinePosition < item.startTime + item.clipDuration) {
+                shouldKeepPlaying = true;
+              }
+            });
+          });
+          
+          if (!shouldKeepPlaying) {
+            audio.pause();
+            return false;
+          }
+          return true;
+        });
+        setActiveAudioElements(updatedAudioElements);
+      }
+      
+      // Stop playback if we've reached the end of all clips
+      let hasActiveClips = false;
+      [...videoTracks, ...audioTracks].forEach(track => {
+        track.items.forEach(item => {
+          if (newTimelinePosition < item.startTime + item.clipDuration) {
+            hasActiveClips = true;
+          }
+        });
+      });
+      
+      if (!hasActiveClips || newTimelinePosition >= duration) {
+        pauseMultipleTracks();
+        setIsPlaying(false);
+      }
+    }, 100); // Update every 100ms for smooth playback
   };
 
   const pauseMultipleTracks = () => {
@@ -209,10 +273,12 @@ const VideoEditor = () => {
       videoRef.current.pause();
     }
     
-    // Pause all active audio elements
-    activeAudioElements.forEach(audio => {
-      audio.pause();
-    });
+    stopAllAudio();
+    
+    if (timelineIntervalRef.current) {
+      clearInterval(timelineIntervalRef.current);
+      timelineIntervalRef.current = null;
+    }
   };
 
   const togglePlayPause = () => {
@@ -225,13 +291,18 @@ const VideoEditor = () => {
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
-    }
+    // This is now handled by the timeline interval in playMultipleTracks
+    // Keep this function for video element compatibility
   };
 
   const handleSeek = (time: number) => {
     setCurrentTime(time);
+    
+    // Stop current playback
+    pauseMultipleTracks();
+    setIsPlaying(false);
+    
+    console.log(`Seeking to timeline position: ${time}s`);
     
     // Update video position with clipping support
     if (videoRef.current) {
@@ -242,20 +313,13 @@ const VideoEditor = () => {
           const clipOffset = videoItem.clipStartOffset || 0;
           const relativeTime = time - videoItem.startTime;
           videoRef.current.currentTime = clipOffset + relativeTime;
+          console.log(`Set video time to: ${videoRef.current.currentTime}s (clip offset: ${clipOffset}s, relative: ${relativeTime}s)`);
         }
       }
     }
-    
-    // Sync audio elements with clipping support
-    activeAudioElements.forEach(audio => {
-      audio.pause();
-    });
-    
-    // Restart audio from new position if playing
-    if (isPlaying) {
-      playMultipleTracks();
-    }
   };
+
+  // ... keep existing code (handleTracksUpdate, addCaption, handleItemRemoval functions)
 
   const handleTracksUpdate = (updatedTracks: Track[]) => {
     setTracks(updatedTracks);
@@ -441,10 +505,17 @@ const VideoEditor = () => {
       const videoClipOffset = videoItem.clipStartOffset || 0;
       sourceVideo.currentTime = videoClipOffset;
       
-      // Set audio to start at their respective clip offsets
+      // Set audio to start at their respective clip offsets with proper timing
       audioSources.forEach(({ audioElement, item }) => {
         const clipOffset = item.clipStartOffset || 0;
         audioElement.currentTime = clipOffset;
+        
+        // Schedule audio to stop at the end of the clip
+        const stopTime = item.clipDuration * 1000; // Convert to milliseconds
+        setTimeout(() => {
+          audioElement.pause();
+          console.log(`Export: Stopped audio clip ${item.name} after ${item.clipDuration}s`);
+        }, stopTime);
       });
       
       sourceVideo.play();
@@ -527,6 +598,16 @@ const VideoEditor = () => {
       setIsExporting(false);
     }
   };
+
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => {
+      if (timelineIntervalRef.current) {
+        clearInterval(timelineIntervalRef.current);
+      }
+      stopAllAudio();
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-black text-white p-6">
