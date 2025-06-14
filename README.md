@@ -1,12 +1,13 @@
 
 # Quick Creator Studio
+<img width="1046" alt="Screenshot 2025-06-14 at 1 05 23 PM" src="https://github.com/user-attachments/assets/86b34a2d-b72a-46aa-a32a-d1dd56270de7" />
 
 A powerful web-based video editor built with React that allows you to create professional videos with AI-generated thumbnails, captions, and multi-track timeline editing.
 
 ## Project Info
 
 **GitHub Repository**: https://github.com/lalomorales22/quick-creator-studio.git
-**Lovable Project URL**: https://lovable.dev/projects/3d789f07-c028-45b6-a9dd-e5d23418f735
+
 
 ## Features
 
